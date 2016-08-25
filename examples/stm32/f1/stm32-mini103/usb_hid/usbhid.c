@@ -1,36 +1,28 @@
-/*
- * This file is part of the libopencm3 project.
- *
- * Copyright (C) 2010 Gareth McMullin <gareth@blacksphere.co.nz>
- *
- * This library is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this library.  If not, see <http://www.gnu.org/licenses/>.
- */
+/* STM32-Keyboard */
 
 #include <stdlib.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/cm3/systick.h>
+#include <libopencm3/cm3/nvic.h>
+#include <libopencm3/cm3/scb.h>
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/hid.h>
+#include <libopencm3/stm32/usart.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include "key_map.h"
 
 /* Define this to include the DFU APP interface. */
-#define INCLUDE_DFU_INTERFACE
+//#define INCLUDE_DFU_INTERFACE
 
 #ifdef INCLUDE_DFU_INTERFACE
 #include <libopencm3/cm3/scb.h>
 #include <libopencm3/usb/dfu.h>
 #endif
+ _Bool configured = 0;
+int _write(int file, char *ptr, int len);
 
 const struct usb_device_descriptor dev = {
 	.bLength = USB_DT_DEVICE_SIZE,
@@ -50,44 +42,39 @@ const struct usb_device_descriptor dev = {
 };
 
 static const uint8_t hid_report_descriptor[] = {
-	0x05, 0x01, /* USAGE_PAGE (Generic Desktop)         */
-	0x09, 0x02, /* USAGE (Mouse)                        */
-	0xa1, 0x01, /* COLLECTION (Application)             */
-	0x09, 0x01, /*   USAGE (Pointer)                    */
-	0xa1, 0x00, /*   COLLECTION (Physical)              */
-	0x05, 0x09, /*     USAGE_PAGE (Button)              */
-	0x19, 0x01, /*     USAGE_MINIMUM (Button 1)         */
-	0x29, 0x03, /*     USAGE_MAXIMUM (Button 3)         */
-	0x15, 0x00, /*     LOGICAL_MINIMUM (0)              */
-	0x25, 0x01, /*     LOGICAL_MAXIMUM (1)              */
-	0x95, 0x03, /*     REPORT_COUNT (3)                 */
-	0x75, 0x01, /*     REPORT_SIZE (1)                  */
-	0x81, 0x02, /*     INPUT (Data,Var,Abs)             */
-	0x95, 0x01, /*     REPORT_COUNT (1)                 */
-	0x75, 0x05, /*     REPORT_SIZE (5)                  */
-	0x81, 0x01, /*     INPUT (Cnst,Ary,Abs)             */
-	0x05, 0x01, /*     USAGE_PAGE (Generic Desktop)     */
-	0x09, 0x30, /*     USAGE (X)                        */
-	0x09, 0x31, /*     USAGE (Y)                        */
-	0x09, 0x38, /*     USAGE (Wheel)                    */
-	0x15, 0x81, /*     LOGICAL_MINIMUM (-127)           */
-	0x25, 0x7f, /*     LOGICAL_MAXIMUM (127)            */
-	0x75, 0x08, /*     REPORT_SIZE (8)                  */
-	0x95, 0x03, /*     REPORT_COUNT (3)                 */
-	0x81, 0x06, /*     INPUT (Data,Var,Rel)             */
-	0xc0,       /*   END_COLLECTION                     */
-	0x09, 0x3c, /*   USAGE (Motion Wakeup)              */
-	0x05, 0xff, /*   USAGE_PAGE (Vendor Defined Page 1) */
-	0x09, 0x01, /*   USAGE (Vendor Usage 1)             */
-	0x15, 0x00, /*   LOGICAL_MINIMUM (0)                */
-	0x25, 0x01, /*   LOGICAL_MAXIMUM (1)                */
-	0x75, 0x01, /*   REPORT_SIZE (1)                    */
-	0x95, 0x02, /*   REPORT_COUNT (2)                   */
-	0xb1, 0x22, /*   FEATURE (Data,Var,Abs,NPrf)        */
-	0x75, 0x06, /*   REPORT_SIZE (6)                    */
-	0x95, 0x01, /*   REPORT_COUNT (1)                   */
-	0xb1, 0x01, /*   FEATURE (Cnst,Ary,Abs)             */
-	0xc0        /* END_COLLECTION                       */
+    0x05, 0x01, /* Usage Page (Generic Desktop)             */
+    0x09, 0x06, /*		Usage (Keyboard)                    */
+    0xA1, 0x01, /*		Collection (Application)            */
+    0x85, 0x01,  /*   Report ID 1  */
+    0x05, 0x07, /*  	Usage (Key codes)                   */
+    0x19, 0xE0, /*      Usage Minimum (224)                 */
+    0x29, 0xE7, /*      Usage Maximum (231)                 */
+    0x15, 0x00, /*      Logical Minimum (0)                 */
+    0x25, 0x01, /*      Logical Maximum (1)                 */
+    0x75, 0x01, /*      Report Size (1)                     */
+    0x95, 0x08, /*      Report Count (8)                    */
+    0x81, 0x02, /*      Input (Data, Variable, Absolute)    */
+    0x95, 0x01, /*      Report Count (1)                    */
+    0x75, 0x08, /*      Report Size (8)                     */
+    0x81, 0x01, /*      Input (Constant)    ;5 bit padding  */
+    0x95, 0x05, /*      Report Count (5)                    */
+    0x75, 0x01, /*      Report Size (1)                     */
+    0x05, 0x08, /*      Usage Page (Page# for LEDs)         */
+    0x19, 0x01, /*      Usage Minimum (01)                  */
+    0x29, 0x05, /*      Usage Maximum (05)                  */
+    0x91, 0x02, /*      Output (Data, Variable, Absolute)   */
+    0x95, 0x01, /*      Report Count (1)                    */
+    0x75, 0x03, /*      Report Size (3)                     */
+    0x91, 0x01, /*      Output (Constant)                   */
+    0x95, 0x06, /*      Report Count (1)                    */
+    0x75, 0x08, /*      Report Size (3)                     */
+    0x15, 0x00, /*      Logical Minimum (0)                 */
+    0x25, 0x65, /*      Logical Maximum (101)               */
+    0x05, 0x07, /*  	Usage (Key codes)                   */
+    0x19, 0x00, /*      Usage Minimum (00)                  */
+    0x29, 0x65, /*      Usage Maximum (101)                 */
+    0x81, 0x00, /*      Input (Data, Array)                 */
+    0xC0        /* 		End Collection,End Collection       */
 };
 
 static const struct {
@@ -115,8 +102,8 @@ const struct usb_endpoint_descriptor hid_endpoint = {
 	.bDescriptorType = USB_DT_ENDPOINT,
 	.bEndpointAddress = 0x81,
 	.bmAttributes = USB_ENDPOINT_ATTR_INTERRUPT,
-	.wMaxPacketSize = 4,
-	.bInterval = 0x20,
+	.wMaxPacketSize = 9,
+	.bInterval = 0x01,
 };
 
 const struct usb_interface_descriptor hid_iface = {
@@ -127,7 +114,7 @@ const struct usb_interface_descriptor hid_iface = {
 	.bNumEndpoints = 1,
 	.bInterfaceClass = USB_CLASS_HID,
 	.bInterfaceSubClass = 1, /* boot */
-	.bInterfaceProtocol = 2, /* mouse */
+	.bInterfaceProtocol = 1, /* keyboard */
 	.iInterface = 0,
 
 	.endpoint = &hid_endpoint,
@@ -190,13 +177,15 @@ const struct usb_config_descriptor config = {
 };
 
 static const char *usb_strings[] = {
-	"Black Sphere Technologies",
-	"HID Demo",
-	"DEMO",
+	"Zhiyuan Wan Workshop",
+	"USB-Keyboard",
+	"For someone",
 };
 
 /* Buffer to be used for control requests. */
 uint8_t usbd_control_buffer[128];
+
+usbd_device *usb_dev;
 
 static int hid_control_request(usbd_device *usbd_dev, struct usb_setup_data *req, uint8_t **buf, uint16_t *len,
 			void (**complete)(usbd_device *usbd_dev, struct usb_setup_data *req))
@@ -264,60 +253,349 @@ static void hid_set_config(usbd_device *usbd_dev, uint16_t wValue)
 				USB_REQ_TYPE_TYPE | USB_REQ_TYPE_RECIPIENT,
 				dfu_control_request);
 #endif
-
-	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
-	/* SysTick interrupt every N clock pulses: set reload to N-1 */
-	systick_set_reload(99999);
-	systick_interrupt_enable();
-	systick_counter_enable();
+	configured = 1;
 }
+
+static void gpio_init(void)
+{
+	gpio_clear(GPIOA, GPIO8);
+	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
+		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO8);
+	gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_2_MHZ,
+		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO11);
+	gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_50_MHZ,
+			GPIO_CNF_OUTPUT_OPENDRAIN, 0x3ff);
+	gpio_set(GPIOB, 0x3ff);
+	gpio_set_mode(GPIOA, GPIO_MODE_INPUT,
+			GPIO_CNF_INPUT_PULL_UPDOWN, 0xff);
+	gpio_set(GPIOA, 0xff);
+	gpio_set(GPIOB, GPIO13 | GPIO15);
+	gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_50_MHZ,
+			GPIO_CNF_OUTPUT_OPENDRAIN, GPIO13 | GPIO15);	//PS2
+	AFIO_MAPR |= AFIO_MAPR_SWJ_CFG_JTAG_OFF_SW_ON ;
+}
+
+static void vector_init(void)
+{
+	/* If you 're using STM32 's bootloader via go function, it has configured the vector address to system flash */
+	/* So you have to configure it back */
+	SCB_VTOR = 0x08000000;
+}
+
+static void usart_init(void)
+{
+	/* Setup GPIO pin GPIO_USART1_RE_TX on GPIO port A for transmit. */
+	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_50_MHZ,
+		      GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO_USART1_TX);
+
+	/* Setup UART parameters. */
+	usart_set_baudrate(USART1, 115200);
+	usart_set_databits(USART1, 8);
+	usart_set_stopbits(USART1, USART_STOPBITS_1);
+	usart_set_parity(USART1, USART_PARITY_NONE);
+	usart_set_flow_control(USART1, USART_FLOWCONTROL_NONE);
+	usart_set_mode(USART1, USART_MODE_TX);
+
+	/* Finally enable the USART. */
+	usart_enable(USART1);
+}
+
+int _write(int file, char *ptr, int len)
+{
+	int i;
+
+	if (file == 1) {
+		for (i = 0; i < len; i++)
+			usart_send_blocking(USART1, ptr[i]);
+		return i;
+	}
+
+	errno = EIO;
+	return -1;
+}
+void ps2_tx(uint8_t keycode);
+
+void ps2_tx(uint8_t keycode)
+{//exti15 pb13
+	int i;
+	int j;
+	int p = 0;
+	if(!(GPIOB_IDR & GPIO13))
+		for(j = 0; j < 10000; j++)
+			asm("nop");		
+	
+	gpio_clear(GPIOB, GPIO15);//dat
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_clear(GPIOB, GPIO13);//clk
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	for(i = 0; i < 8; i++)
+	{
+		gpio_set(GPIOB, GPIO13);
+		if((keycode >> i) & 0x01)
+		{
+			p++;
+			gpio_set(GPIOB, GPIO15);
+		}
+		else
+		{
+			gpio_clear(GPIOB, GPIO15);
+		}
+		for(j = 0; j < 300; j++)
+			asm("nop");	
+		gpio_clear(GPIOB, GPIO13);//clk
+		for(j = 0; j < 300; j++)
+			asm("nop");
+		
+	}
+	gpio_set(GPIOB, GPIO13);
+	if(p % 2 == 0)
+		gpio_set(GPIOB, GPIO15);
+	else
+		gpio_clear(GPIOB, GPIO15);
+
+	for(j = 0; j < 300; j++)
+		asm("nop");	
+	gpio_clear(GPIOB, GPIO13);//clk
+	for(j = 0; j < 300; j++)
+		asm("nop");	
+		
+	gpio_set(GPIOB, GPIO13);
+	gpio_set(GPIOB, GPIO15);
+
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_clear(GPIOB, GPIO13);//clk
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_set(GPIOB, GPIO13);	
+	
+}
+
+//7 * 10 keyboard
+/*
+ * Keyboard buffer:
+ * buf[1]: MOD
+ * buf[2]: reserved
+ * buf[3]..buf[8] - keycodes 1..6
+ */
+volatile uint8_t key_table[2][16];
+volatile uint8_t hid_buf[9] = {1,0,0,0,0,0,0,0,0};
+volatile uint8_t key_ptr = 0;
+volatile int8_t hid_keys = 0;
 
 int main(void)
 {
 	int i;
+	
+	vector_init();
+	
 
-	usbd_device *usbd_dev;
-
+	//rcc_clock_setup_in_hsi_out_48mhz();
 	rcc_clock_setup_in_hse_8mhz_out_72mhz();
 
 	rcc_periph_clock_enable(RCC_GPIOA);
+	rcc_periph_clock_enable(RCC_GPIOB);
+	rcc_periph_clock_enable(RCC_AFIO);
+	rcc_periph_clock_enable(RCC_USART1);
+	memset(key_table, 0xff, sizeof(key_table));
+	gpio_init();
+	usart_init();
 
-	gpio_clear(GPIOA, GPIO8);
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
-		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO8);
-
-	usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
-	usbd_register_set_config_callback(usbd_dev, hid_set_config);
+	usb_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
+	usbd_register_set_config_callback(usb_dev, hid_set_config);
 
 	for (i = 0; i < 0x80000; i++)
 		__asm__("nop");
 
 	gpio_set(GPIOA, GPIO8);
+	
+	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
+	/* SysTick interrupt every N clock pulses: set reload to N-1 */
+	systick_set_reload(200000);
+	systick_interrupt_enable();
+	systick_counter_enable();
 
-	rcc_periph_clock_enable(RCC_GPIOB);
-
-	gpio_set(GPIOB, GPIO12);
-	gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_2_MHZ,
-		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO12);
+	gpio_set(GPIOB, GPIO11);
+	
 
 	while (1)
-		usbd_poll(usbd_dev);
+	{
+		
+		usbd_poll(usb_dev);
+	}
 }
 
-#if 0 /* is this used? */
+
+
 void sys_tick_handler(void)
-{
-	static int x = 0;
-	static int dir = 1;
-	uint8_t buf[4] = {0, 0, 0, 0};
+{//Keyboard scanning
+	static int cnt = 0;
+	int i;
+	int j;
+	static uint8_t zzz_key = 0;
+	
 
-	buf[1] = dir;
-	x += dir;
-	if (x > 30)
-		dir = -dir;
-	if (x < -30)
-		dir = -dir;
+	
+	
+	key_ptr = !key_ptr;
+	
+	for(i = 0; i < 10; i++)
+	{
+		if(i != 0)
+			gpio_set(GPIOB, 1 << (i - 1));
+		gpio_clear(GPIOB, (1 << i));
+		for( j = 0; j < 32; j++)
+			asm("nop");
+		key_table[key_ptr][i] = GPIOA_IDR;
+		for( j = 0; j < 32; j++)
+			asm("nop");
+	}
+	gpio_set(GPIOB, 0x3ff);
+	
+	for( i = 0; i < 10; i++)
+	{
+		uint8_t tmp = key_table[key_ptr][i] ^ key_table[(!key_ptr)][i];
+		if(tmp)
+		{
+			
+			for(j = 0; j < 7;j ++)
+			{
+				if(tmp & (1 << j))
+				{
+					uint8_t mod = 0, keycode = 0;
+					uint8_t key1 = 0, key2 = 0, ex = 0;
+					int k;
+					
+					mod = key_map[i][j] >> 8;
+					keycode = key_map[i][j] & 0xff;
+					
+					
 
-	usbd_ep_write_packet(usbd_dev, 0x81, buf, 4);
+
+					if(key_table[key_ptr][i] & (1 << j))
+					{
+						printf("key %d, %d up mod = %d keycode = %d kp = %d\r\n", i, j, mod, keycode, key_ptr);
+						if(keycode)
+						{
+							if(hid_keys > 0)
+								hid_keys --;
+							for(k = 3; k < 9; k++)
+							{
+								if(hid_buf[k] == keycode)
+								{
+									hid_buf[k] = 0;
+									break;
+								}
+							}							
+						}
+						hid_buf[1] &= ~mod;
+						ex = (PS2_map[i][j] >> 16) & 0xff;
+						key1 = 	(PS2_map[i][j] >> 8) & 0xff;
+						key2 = PS2_map[i][j] & 0xff;
+						if(key1)
+						{
+							if(ex)
+								ps2_tx(0xe0);
+							ps2_tx(PS2_RELEASED);
+							ps2_tx(key1);
+							printf("tx key1 up %d\r\n", key1);
+						}
+						if(key2)
+						{
+							for( k = 0; k < 5; k++)
+								asm("nop");
+							printf("tx key2 up %d\r\n", key2);
+							ps2_tx(PS2_RELEASED);
+							ps2_tx(key2);
+						}				
+						
+					}
+					else
+					{
+						printf("key %d, %d down hid_keys = %d mod = %d keycode = %d kp = %d\r\n", i, j, hid_keys, mod, keycode, key_ptr);
+						if(i == 8 && j == 5 && (zzz_key == 0 || zzz_key == 7))
+						{
+							zzz_key = 1;
+							continue;
+						}
+						if(hid_keys < 6 && keycode != 0)
+						{
+							hid_keys ++;
+							for(k = 3; k < 9; k++)
+							{
+								if(hid_buf[k] == 0)
+								{
+									hid_buf[k] = keycode;
+									break;
+								}
+							}
+						}
+						hid_buf[1] |= mod;
+						ex = (PS2_map[i][j] >> 16) & 0xff;
+						key1 = 	(PS2_map[i][j] >> 8) & 0xff;
+						key2 = PS2_map[i][j] & 0xff;
+						if(key1)
+						{
+							if(ex)
+								ps2_tx(0xe0);
+							ps2_tx(key1);
+							printf("tx key 1 down %d\r\n", key1);
+						}
+						if(key2)
+						{
+							for( k = 0; k < 5; k++)
+								asm("nop");
+							ps2_tx(key2);
+							printf("tx key 2 down %d\r\n", key2);
+						}
+					}
+				}
+			}
+		}
+	}
+	if(zzz_key > 0 && zzz_key < 7)
+	{
+		if(zzz_key % 2 == 0)
+		{
+			for(i = 3; i < 9; i++)
+			{
+				if(hid_buf[i] == KEY_0)
+				{
+					hid_buf[i] = 0;
+					break;
+				}
+			}
+			ps2_tx(PS2_RELEASED);
+			ps2_tx(PS2_0);
+			printf("key up 0");
+		}
+		else
+		{
+			for(i = 3; i < 9; i++)
+			{
+				if(hid_buf[i] == 0)
+				{
+					hid_buf[i] = KEY_0;
+					break;
+				}
+			}
+			ps2_tx(PS2_0);
+			printf("keydown 0");
+		}
+		printf(" zzz_key = %d\r\n", zzz_key);
+		zzz_key++;		
+	}
+	if(configured)
+		usbd_ep_write_packet(usb_dev, 0x81, (void *)hid_buf, 9);
+	cnt++;
+	if(cnt == 5)
+	{
+		//printf("cnt = %d \r\n", cnt);
+		//ps2_tx(0x1c);
+		//gpio_toggle(GPIOB, GPIO11);
+		cnt = 0;
+	}
 }
-#endif
+
