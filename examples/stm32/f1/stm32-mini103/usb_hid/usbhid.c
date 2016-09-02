@@ -327,7 +327,7 @@ void exti15_10_isr(void)
 {//ps2_rx
 	char cmd = 0;
 	int i, j;
-	while(!(GPIOB_IDR & GPIO13));//waiting for clock low
+	while(!(GPIOB_IDR & GPIO13));//waiting for clock high
 	
 	for(i = 0; i < 9; i++)
 	{
@@ -361,6 +361,9 @@ void exti15_10_isr(void)
 	for(j = 0; j < 300; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);
+	
+	for(j = 0; j < 300; j++)
+		asm("nop");
 	gpio_set(GPIOB, GPIO15);
 		
 	for(j = 0; j < 300; j++)
@@ -371,6 +374,7 @@ void exti15_10_isr(void)
 		ps2_tx(0xfa);
 	if(cmd == 0xf2)
 		ps2_tx(0xab);
+	printf("Recieved 0x%02X from host\r\n", cmd);
 	exti_reset_request(EXTI13);
 }
 
@@ -426,12 +430,14 @@ void ps2_tx(uint8_t keycode)
 	gpio_set(GPIOB, GPIO13);
 	gpio_set(GPIOB, GPIO15);
 
-	for(j = 0; j < 400; j++)
+	for(j = 0; j < 300; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 400; j++)
+	for(j = 0; j < 300; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);	
+	for(j = 0; j < 600; j++)
+		asm("nop");
 	
 }
 
@@ -465,6 +471,7 @@ int main(void)
 	gpio_init();
 	usart_init();
 
+	printf("Early initialized console\r\n");
 	usb_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
 	usbd_register_set_config_callback(usb_dev, hid_set_config);
 	
@@ -489,6 +496,7 @@ int main(void)
 	systick_interrupt_enable();
 	systick_counter_enable();
 	
+	printf("Self POST operation done\r\n");
 	
 	
 	
