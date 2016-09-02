@@ -325,23 +325,27 @@ void ps2_tx(uint8_t keycode);
 
 void exti15_10_isr(void)
 {//ps2_rx
-	char cmd = 0;
+	unsigned char cmd = 0;
 	int i, j;
 	while(!(GPIOB_IDR & GPIO13));//waiting for clock high
-	
+
+	for(j = 0; j < 150; j++)
+		asm("nop");	
 	for(i = 0; i < 9; i++)
 	{
-		for(j = 0; j < 300; j++)
+		for(j = 0; j < 150; j++)
 			asm("nop");
 		gpio_clear(GPIOB, GPIO13);//clk low
-		for(j = 0; j < 32; j++)
-			asm("nop");
+		for(j = 0; j < 300; j++)
+			asm("nop");		
+		gpio_set(GPIOB, GPIO13);//clk high
+		
+		for(j = 0; j < 150; j++)
+			asm("nop");		
 		cmd >>= 1;
 		if(GPIOB_IDR & GPIO15)
 			cmd |= 0x80;
-		for(j = 0; j < 268; j++)
-			asm("nop");
-		gpio_set(GPIOB, GPIO13);//clk high		
+				
 	}
 	/* We just ignore the parity bit */
 	for(j = 0; j < 300; j++)
@@ -351,10 +355,12 @@ void exti15_10_isr(void)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);
 	
+	for(j = 0; j < 150; j++)
+		asm("nop");	
 	/* ACK it */
 	gpio_clear(GPIOB, GPIO15);
 
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 50; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);
 	
@@ -362,7 +368,7 @@ void exti15_10_isr(void)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);
 	
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 50; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO15);
 		
@@ -502,7 +508,7 @@ int main(void)
 	
 	gpio_set(GPIOB, GPIO11);
 	
-	
+	printf("Now entry loop\r\n");
 	while (1)
 	{
 		
@@ -730,11 +736,12 @@ void sys_tick_handler(void)
 	if(configured)
 		usbd_ep_write_packet(usb_dev, 0x81, (void *)hid_buf, 9);
 	cnt++;
-	if(cnt == 5)
+	if(cnt == 20)
 	{
 		//printf("cnt = %d \r\n", cnt);
 		//ps2_tx(0x1c);
-		//gpio_toggle(GPIOB, GPIO11);
+		printf("Still alive\r\n");
+		gpio_toggle(GPIOB, GPIO11);
 		cnt = 0;
 	}
 }
