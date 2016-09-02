@@ -13,6 +13,12 @@
 #include <errno.h>
 #include <string.h>
 #include "key_map.h"
+#include <libopencm3/stm32/exti.h>
+
+#define FALLING 0
+#define RISING 1
+
+uint16_t exti_direction = FALLING;
 
 /* Define this to include the DFU APP interface. */
 //#define INCLUDE_DFU_INTERFACE
@@ -22,6 +28,7 @@
 #include <libopencm3/usb/dfu.h>
 #endif
  _Bool configured = 0;
+
 int _write(int file, char *ptr, int len);
 
 const struct usb_device_descriptor dev = {
@@ -313,7 +320,62 @@ int _write(int file, char *ptr, int len)
 	errno = EIO;
 	return -1;
 }
+
 void ps2_tx(uint8_t keycode);
+
+void exti15_10_isr(void)
+{//ps2_rx
+	char cmd = 0;
+	int i, j;
+	while(!(GPIOB_IDR & GPIO13));//waiting for clock low
+	
+	for(i = 0; i < 9; i++)
+	{
+		for(j = 0; j < 300; j++)
+			asm("nop");
+		gpio_clear(GPIOB, GPIO13);//clk low
+		for(j = 0; j < 32; j++)
+			asm("nop");
+		cmd >>= 1;
+		if(GPIOB_IDR & GPIO15)
+			cmd |= 0x80;
+		for(j = 0; j < 268; j++)
+			asm("nop");
+		gpio_set(GPIOB, GPIO13);//clk high		
+	}
+	/* We just ignore the parity bit */
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_clear(GPIOB, GPIO13);
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_set(GPIOB, GPIO13);
+	
+	/* ACK it */
+	gpio_clear(GPIOB, GPIO15);
+
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_clear(GPIOB, GPIO13);
+	
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	gpio_set(GPIOB, GPIO13);
+	gpio_set(GPIOB, GPIO15);
+		
+	for(j = 0; j < 300; j++)
+		asm("nop");
+	if(cmd != 0xff)
+		ps2_tx(0xaa);
+	else
+		ps2_tx(0xfa);
+	if(cmd == 0xf2)
+		ps2_tx(0xab);
+	exti_reset_request(EXTI13);
+}
+
+
+
 
 void ps2_tx(uint8_t keycode)
 {//exti15 pb13
@@ -321,7 +383,7 @@ void ps2_tx(uint8_t keycode)
 	int j;
 	int p = 0;
 	if(!(GPIOB_IDR & GPIO13))
-		for(j = 0; j < 10000; j++)
+		for(j = 0; j < 1000; j++)
 			asm("nop");		
 	
 	gpio_clear(GPIOB, GPIO15);//dat
@@ -364,10 +426,10 @@ void ps2_tx(uint8_t keycode)
 	gpio_set(GPIOB, GPIO13);
 	gpio_set(GPIOB, GPIO15);
 
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 400; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 400; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);	
 	
@@ -405,21 +467,34 @@ int main(void)
 
 	usb_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
 	usbd_register_set_config_callback(usb_dev, hid_set_config);
+	
+	/* Enable EXTI13 interrupt. */
+	nvic_enable_irq(NVIC_EXTI15_10_IRQ);
+	
+	exti_select_source(EXTI13, GPIOB);
+	exti_direction = FALLING;
+	exti_set_trigger(EXTI13, EXTI_TRIGGER_FALLING);
+	exti_enable_request(EXTI13);
 
-	for (i = 0; i < 0x80000; i++)
+	for (i = 0; i < 0x100000; i++)
 		__asm__("nop");
 
 	gpio_set(GPIOA, GPIO8);
+	
+	ps2_tx(0xaa);/* POST successfully */
 	
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
 	/* SysTick interrupt every N clock pulses: set reload to N-1 */
 	systick_set_reload(200000);
 	systick_interrupt_enable();
 	systick_counter_enable();
-
+	
+	
+	
+	
 	gpio_set(GPIOB, GPIO11);
 	
-
+	
 	while (1)
 	{
 		
@@ -435,7 +510,7 @@ void sys_tick_handler(void)
 	int i;
 	int j;
 	static uint8_t zzz_key = 0;
-	
+	static uint8_t ctrlprt = 0;
 
 	
 	
@@ -477,6 +552,23 @@ void sys_tick_handler(void)
 					if(key_table[key_ptr][i] & (1 << j))
 					{
 						printf("key %d, %d up mod = %d keycode = %d kp = %d\r\n", i, j, mod, keycode, key_ptr);
+						if(i == 9 && j == 0)
+						{
+							ctrlprt = 4;
+							for(i = 3; i < 9; i++)
+							{
+								if(hid_buf[i] == KEY_PRINTSCREEN)
+								{
+									hid_buf[i] = 0;
+									break;
+								}
+							}
+							ps2_tx(0xe0);
+							ps2_tx(PS2_RELEASED);
+							ps2_tx(PS2_EX_SCRN & 0xff);
+							printf("ctrl+prtsc prtsc up\r\n");
+							continue;
+						}
 						if(keycode)
 						{
 							if(hid_keys > 0)
@@ -518,6 +610,14 @@ void sys_tick_handler(void)
 						if(i == 8 && j == 5 && (zzz_key == 0 || zzz_key == 7))
 						{
 							zzz_key = 1;
+							continue;
+						}
+						if(i == 9 && j == 0)
+						{
+							ctrlprt = 1;
+							hid_buf[1] |= MOD_CTRL;
+							ps2_tx(PS2_L_CTRL);
+							printf("ctrl+prtsc ctrl down\r\n");
 							continue;
 						}
 						if(hid_keys < 6 && keycode != 0)
@@ -587,6 +687,38 @@ void sys_tick_handler(void)
 		printf(" zzz_key = %d\r\n", zzz_key);
 		zzz_key++;		
 	}
+	if(ctrlprt == 5)
+	{
+		hid_buf[1] &= ~MOD_CTRL;
+		ps2_tx(PS2_RELEASED);
+		ps2_tx(PS2_L_CTRL);
+		ctrlprt = 6;
+		printf("ctrl+prtsc ctrl up\r\n");
+	}
+	if(ctrlprt == 4)
+	{
+		ctrlprt = 5;
+	}
+	if(ctrlprt == 2)
+	{
+		ps2_tx(0xe0);
+		ps2_tx(PS2_EX_SCRN & 0xff);
+		for(i = 3; i < 9; i++)
+		{
+			if(hid_buf[i] == 0)
+			{
+				hid_buf[i] = KEY_PRINTSCREEN;
+				break;
+			}
+		}
+		ctrlprt = 3;
+		printf("ctrl+prtsc prtsc down\r\n");
+	}
+	if(ctrlprt == 1)
+	{
+		ctrlprt = 2;
+	}
+	
 	if(configured)
 		usbd_ep_write_packet(usb_dev, 0x81, (void *)hid_buf, 9);
 	cnt++;
