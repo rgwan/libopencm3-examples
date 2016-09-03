@@ -209,7 +209,7 @@ static const uint16_t key_map[10][7] =
 
 static const uint32_t PS2_map[10][7] = 
 {
-	{GRP(PS2_L_ALT, PS2_F3), GRP(RIGHT(PS2_R_SHFT), 0), PS2_F6, PS2_F12, PS2_F10, GRP(PS2_L_ALT, PS2_F2), PS2_F3},
+	{GRP(PS2_L_ALT, PS2_F3), PS2_R_SHFT, PS2_F6, PS2_F12, PS2_F10, GRP(PS2_L_ALT, PS2_F2), PS2_F3},
 	{PS2_A, PS2_F, PS2_K, PS2_P, GRP(PS2_L_ALT, PS2_F6), GRP(PS2_L_ALT, PS2_F7), PS2_F9},
 	{PS2_B, PS2_G, PS2_L, PS2_Q, PS2_F1, PS2_F2, PS2_F11},
 	{PS2_C, PS2_H, PS2_M, PS2_R, PS2_F8, PS2_F7, GRP(PS2_L_ALT, PS2_F8)},
@@ -220,3 +220,6 @@ static const uint32_t PS2_map[10][7] =
 	{GRP(PS2_EX_PG_DN, 0), GRP(PS2_EX_R_ARROW, 0), PS2_3, PS2_6, PS2_9, 0, PS2_TAB},
 	{GRP(PS2_EX_SCRN, PS2_L_CTRL), GRP(PS2_L_ALT, PS2_F4), PS2_ESC, PS2_F5, PS2_F4, GRP(PS2_L_ALT, PS2_F1), PS2_ENTER}
 };
+
+#define cli() asm volatile ("cpsid i")
+#define sei() asm volatile ("cpsie i")

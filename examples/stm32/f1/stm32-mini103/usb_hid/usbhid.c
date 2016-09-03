@@ -28,7 +28,7 @@ uint16_t exti_direction = FALLING;
 #include <libopencm3/usb/dfu.h>
 #endif
  _Bool configured = 0;
-
+ uint8_t ps2_cmd = 0;
 int _write(int file, char *ptr, int len);
 
 const struct usb_device_descriptor dev = {
@@ -322,66 +322,73 @@ int _write(int file, char *ptr, int len)
 }
 
 void ps2_tx(uint8_t keycode);
+void ps2_poll(void);
 
-void exti15_10_isr(void)
+void ps2_poll(void)
 {//ps2_rx
 	unsigned char cmd = 0;
-	int i, j;
-	while(!(GPIOB_IDR & GPIO13));//waiting for clock high
-
-	for(j = 0; j < 150; j++)
+	volatile int i = 0, j;
+	cli();
+	if(GPIOB_IDR & GPIO13)
+		goto out;
+	
+	while(!(GPIOB_IDR & GPIO13))
+	{
+		i ++;
+		if(i > 10000)
+		{
+			goto out;
+		}
+	}//waiting for clock high
+	
+	for(j = 0; j < 32; j++)
 		asm("nop");	
 	for(i = 0; i < 9; i++)
 	{
-		for(j = 0; j < 150; j++)
+		for(j = 0; j < 568; j++)
 			asm("nop");
 		gpio_clear(GPIOB, GPIO13);//clk low
-		for(j = 0; j < 300; j++)
+		for(j = 0; j < 600; j++)
 			asm("nop");		
 		gpio_set(GPIOB, GPIO13);//clk high
 		
-		for(j = 0; j < 150; j++)
+		for(j = 0; j < 32; j++)
 			asm("nop");		
 		cmd >>= 1;
 		if(GPIOB_IDR & GPIO15)
 			cmd |= 0x80;
+		else
+			cmd &= 0x7f;
 				
 	}
 	/* We just ignore the parity bit */
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 600; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 600; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);
 	
-	for(j = 0; j < 150; j++)
+	for(j = 0; j < 300; j++)
 		asm("nop");	
 	/* ACK it */
 	gpio_clear(GPIOB, GPIO15);
 
-	for(j = 0; j < 50; j++)
+	for(j = 0; j < 300; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);
 	
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 600; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);
 	
 	for(j = 0; j < 50; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO15);
-		
-	for(j = 0; j < 300; j++)
-		asm("nop");
-	if(cmd != 0xff)
-		ps2_tx(0xaa);
-	else
-		ps2_tx(0xfa);
-	if(cmd == 0xf2)
-		ps2_tx(0xab);
-	printf("Recieved 0x%02X from host\r\n", cmd);
-	exti_reset_request(EXTI13);
+	
+	ps2_cmd = cmd;
+out:
+	sei();
 }
 
 
@@ -392,15 +399,18 @@ void ps2_tx(uint8_t keycode)
 	int i;
 	int j;
 	int p = 0;
+	
+	
 	if(!(GPIOB_IDR & GPIO13))
-		for(j = 0; j < 1000; j++)
-			asm("nop");		
+		for(j = 0; j < 7000; j++)
+			asm("nop");	
+
 	
 	gpio_clear(GPIOB, GPIO15);//dat
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 500; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 500; j++)
 		asm("nop");
 	for(i = 0; i < 8; i++)
 	{
@@ -414,10 +424,10 @@ void ps2_tx(uint8_t keycode)
 		{
 			gpio_clear(GPIOB, GPIO15);
 		}
-		for(j = 0; j < 300; j++)
+		for(j = 0; j < 500; j++)
 			asm("nop");	
 		gpio_clear(GPIOB, GPIO13);//clk
-		for(j = 0; j < 300; j++)
+		for(j = 0; j < 500; j++)
 			asm("nop");
 		
 	}
@@ -427,24 +437,25 @@ void ps2_tx(uint8_t keycode)
 	else
 		gpio_clear(GPIOB, GPIO15);
 
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 500; j++)
 		asm("nop");	
 	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 500; j++)
 		asm("nop");	
 		
 	gpio_set(GPIOB, GPIO13);
 	gpio_set(GPIOB, GPIO15);
 
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 500; j++)
 		asm("nop");
 	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 300; j++)
+	for(j = 0; j < 500; j++)
 		asm("nop");
 	gpio_set(GPIOB, GPIO13);	
 	for(j = 0; j < 600; j++)
 		asm("nop");
-	
+		
+
 }
 
 //7 * 10 keyboard
@@ -481,37 +492,77 @@ int main(void)
 	usb_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
 	usbd_register_set_config_callback(usb_dev, hid_set_config);
 	
+	nvic_set_priority(NVIC_EXTI15_10_IRQ, 1);
+	nvic_set_priority(NVIC_SYSTICK_IRQ, 2);
+	
 	/* Enable EXTI13 interrupt. */
-	nvic_enable_irq(NVIC_EXTI15_10_IRQ);
+	
+	/*nvic_enable_irq(NVIC_EXTI15_10_IRQ);
 	
 	exti_select_source(EXTI13, GPIOB);
 	exti_direction = FALLING;
 	exti_set_trigger(EXTI13, EXTI_TRIGGER_FALLING);
-	exti_enable_request(EXTI13);
+	exti_enable_request(EXTI13);*/
 
-	for (i = 0; i < 0x100000; i++)
-		__asm__("nop");
-
-	gpio_set(GPIOA, GPIO8);
+	for (i = 0; i < 0x10000; i++)
+		__asm__("nop");	
 	
 	ps2_tx(0xaa);/* POST successfully */
+	
+	gpio_set(GPIOB, GPIO13);
+	gpio_set(GPIOB, GPIO15);
+	
+	printf("Self POST operation done\r\n");	
+	
+	
+	/*for (i = 0; i < 0x10000; i++)
+		__asm__("nop");*/
 	
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
 	/* SysTick interrupt every N clock pulses: set reload to N-1 */
 	systick_set_reload(200000);
 	systick_interrupt_enable();
-	systick_counter_enable();
-	
-	printf("Self POST operation done\r\n");
-	
-	
+	systick_counter_enable();	
 	
 	gpio_set(GPIOB, GPIO11);
+	gpio_set(GPIOA, GPIO8);
 	
 	printf("Now entry loop\r\n");
+	
+	i = 512;
+	while(i--)
+	{
+		ps2_poll();
+		if(ps2_cmd)
+		{
+			cli();
+			printf("Recieved 0x%02x from host\r\n", ps2_cmd);
+			if(ps2_cmd == 0xff)
+				ps2_tx(0xaa);
+			else
+				ps2_tx(0xfa);
+			if(ps2_cmd == 0xf2)
+				ps2_tx(0xab);
+			ps2_cmd = 0;
+			sei();
+		}
+	}
 	while (1)
 	{
-		
+		ps2_poll();
+		if(ps2_cmd)
+		{
+			cli();
+			printf("Recieved 0x%02x from host\r\n", ps2_cmd);
+			if(ps2_cmd == 0xff)
+				ps2_tx(0xaa);
+			else
+				ps2_tx(0xfa);
+			if(ps2_cmd == 0xf2)
+				ps2_tx(0xab);
+			ps2_cmd = 0;
+			sei();
+		}
 		usbd_poll(usb_dev);
 	}
 }
@@ -569,17 +620,20 @@ void sys_tick_handler(void)
 						if(i == 9 && j == 0)
 						{
 							ctrlprt = 4;
-							for(i = 3; i < 9; i++)
+							for(k = 3; k < 9; k++)
 							{
-								if(hid_buf[i] == KEY_PRINTSCREEN)
+								if(hid_buf[k] == KEY_PRINTSCREEN)
 								{
-									hid_buf[i] = 0;
+									hid_buf[k] = 0;
 									break;
 								}
 							}
+							//cli();
 							ps2_tx(0xe0);
 							ps2_tx(PS2_RELEASED);
 							ps2_tx(PS2_EX_SCRN & 0xff);
+							//exti_reset_request(EXTI13);
+							//sei();
 							printf("ctrl+prtsc prtsc up\r\n");
 							continue;
 						}
@@ -602,19 +656,25 @@ void sys_tick_handler(void)
 						key2 = PS2_map[i][j] & 0xff;
 						if(key1)
 						{
+							//cli();
 							if(ex)
 								ps2_tx(0xe0);
 							ps2_tx(PS2_RELEASED);
 							ps2_tx(key1);
 							printf("tx key1 up %d\r\n", key1);
+							//exti_reset_request(EXTI13);
+							//sei();
 						}
 						if(key2)
 						{
 							for( k = 0; k < 5; k++)
 								asm("nop");
+							//cli();
 							printf("tx key2 up %d\r\n", key2);
 							ps2_tx(PS2_RELEASED);
 							ps2_tx(key2);
+							//exti_reset_request(EXTI13);
+							//sei();
 						}				
 						
 					}
@@ -630,7 +690,10 @@ void sys_tick_handler(void)
 						{
 							ctrlprt = 1;
 							hid_buf[1] |= MOD_CTRL;
+							//cli();
 							ps2_tx(PS2_L_CTRL);
+							//exti_reset_request(EXTI13);
+							//sei();
 							printf("ctrl+prtsc ctrl down\r\n");
 							continue;
 						}
@@ -652,16 +715,20 @@ void sys_tick_handler(void)
 						key2 = PS2_map[i][j] & 0xff;
 						if(key1)
 						{
+							//cli();
 							if(ex)
 								ps2_tx(0xe0);
 							ps2_tx(key1);
+							//exti_reset_request(EXTI13);
+							//sei();
 							printf("tx key 1 down %d\r\n", key1);
 						}
 						if(key2)
 						{
-							for( k = 0; k < 5; k++)
-								asm("nop");
+							//cli();
 							ps2_tx(key2);
+							//exti_reset_request(EXTI13);
+							//sei();
 							printf("tx key 2 down %d\r\n", key2);
 						}
 					}
@@ -681,8 +748,11 @@ void sys_tick_handler(void)
 					break;
 				}
 			}
+			//cli();
 			ps2_tx(PS2_RELEASED);
 			ps2_tx(PS2_0);
+			//exti_reset_request(EXTI13);
+			//sei();
 			printf("key up 0");
 		}
 		else
@@ -695,7 +765,10 @@ void sys_tick_handler(void)
 					break;
 				}
 			}
+			//cli();
 			ps2_tx(PS2_0);
+			//exti_reset_request(EXTI13);
+			//sei();
 			printf("keydown 0");
 		}
 		printf(" zzz_key = %d\r\n", zzz_key);
@@ -704,8 +777,11 @@ void sys_tick_handler(void)
 	if(ctrlprt == 5)
 	{
 		hid_buf[1] &= ~MOD_CTRL;
+		//cli();
 		ps2_tx(PS2_RELEASED);
 		ps2_tx(PS2_L_CTRL);
+		//exti_reset_request(EXTI13);
+		//sei();
 		ctrlprt = 6;
 		printf("ctrl+prtsc ctrl up\r\n");
 	}
@@ -715,8 +791,12 @@ void sys_tick_handler(void)
 	}
 	if(ctrlprt == 2)
 	{
+		//cli();
 		ps2_tx(0xe0);
 		ps2_tx(PS2_EX_SCRN & 0xff);
+		//exti_reset_request(EXTI13);
+		//sei();
+		
 		for(i = 3; i < 9; i++)
 		{
 			if(hid_buf[i] == 0)
@@ -740,7 +820,7 @@ void sys_tick_handler(void)
 	{
 		//printf("cnt = %d \r\n", cnt);
 		//ps2_tx(0x1c);
-		printf("Still alive\r\n");
+		//printf("Still alive\r\n"); 
 		gpio_toggle(GPIOB, GPIO11);
 		cnt = 0;
 	}
