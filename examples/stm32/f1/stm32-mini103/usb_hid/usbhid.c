@@ -321,142 +321,6 @@ int _write(int file, char *ptr, int len)
 	return -1;
 }
 
-void ps2_tx(uint8_t keycode);
-void ps2_poll(void);
-
-void ps2_poll(void)
-{//ps2_rx
-	unsigned char cmd = 0;
-	volatile int i = 0, j;
-	cli();
-	if(GPIOB_IDR & GPIO13)
-		goto out;
-	
-	while(!(GPIOB_IDR & GPIO13))
-	{
-		i ++;
-		if(i > 10000)
-		{
-			goto out;
-		}
-	}//waiting for clock high
-	
-	for(j = 0; j < 32; j++)
-		asm("nop");	
-	for(i = 0; i < 9; i++)
-	{
-		for(j = 0; j < 568; j++)
-			asm("nop");
-		gpio_clear(GPIOB, GPIO13);//clk low
-		for(j = 0; j < 600; j++)
-			asm("nop");		
-		gpio_set(GPIOB, GPIO13);//clk high
-		
-		for(j = 0; j < 32; j++)
-			asm("nop");		
-		cmd >>= 1;
-		if(GPIOB_IDR & GPIO15)
-			cmd |= 0x80;
-		else
-			cmd &= 0x7f;
-				
-	}
-	/* We just ignore the parity bit */
-	for(j = 0; j < 600; j++)
-		asm("nop");
-	gpio_clear(GPIOB, GPIO13);
-	for(j = 0; j < 600; j++)
-		asm("nop");
-	gpio_set(GPIOB, GPIO13);
-	
-	for(j = 0; j < 300; j++)
-		asm("nop");	
-	/* ACK it */
-	gpio_clear(GPIOB, GPIO15);
-
-	for(j = 0; j < 300; j++)
-		asm("nop");
-	gpio_clear(GPIOB, GPIO13);
-	
-	for(j = 0; j < 600; j++)
-		asm("nop");
-	gpio_set(GPIOB, GPIO13);
-	
-	for(j = 0; j < 50; j++)
-		asm("nop");
-	gpio_set(GPIOB, GPIO15);
-	
-	ps2_cmd = cmd;
-out:
-	sei();
-}
-
-
-
-
-void ps2_tx(uint8_t keycode)
-{//exti15 pb13
-	int i;
-	int j;
-	int p = 0;
-	
-	
-	if(!(GPIOB_IDR & GPIO13))
-		for(j = 0; j < 7000; j++)
-			asm("nop");	
-
-	
-	gpio_clear(GPIOB, GPIO15);//dat
-	for(j = 0; j < 500; j++)
-		asm("nop");
-	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 500; j++)
-		asm("nop");
-	for(i = 0; i < 8; i++)
-	{
-		gpio_set(GPIOB, GPIO13);
-		if((keycode >> i) & 0x01)
-		{
-			p++;
-			gpio_set(GPIOB, GPIO15);
-		}
-		else
-		{
-			gpio_clear(GPIOB, GPIO15);
-		}
-		for(j = 0; j < 500; j++)
-			asm("nop");	
-		gpio_clear(GPIOB, GPIO13);//clk
-		for(j = 0; j < 500; j++)
-			asm("nop");
-		
-	}
-	gpio_set(GPIOB, GPIO13);
-	if(p % 2 == 0)
-		gpio_set(GPIOB, GPIO15);
-	else
-		gpio_clear(GPIOB, GPIO15);
-
-	for(j = 0; j < 500; j++)
-		asm("nop");	
-	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 500; j++)
-		asm("nop");	
-		
-	gpio_set(GPIOB, GPIO13);
-	gpio_set(GPIOB, GPIO15);
-
-	for(j = 0; j < 500; j++)
-		asm("nop");
-	gpio_clear(GPIOB, GPIO13);//clk
-	for(j = 0; j < 500; j++)
-		asm("nop");
-	gpio_set(GPIOB, GPIO13);	
-	for(j = 0; j < 600; j++)
-		asm("nop");
-		
-
-}
 
 //7 * 10 keyboard
 /*
@@ -473,6 +337,7 @@ volatile int8_t hid_keys = 0;
 int main(void)
 {
 	int i;
+	int reset = 0;
 	
 	vector_init();
 	
@@ -507,7 +372,7 @@ int main(void)
 	for (i = 0; i < 0x10000; i++)
 		__asm__("nop");	
 	
-	ps2_tx(0xaa);/* POST successfully */
+	//ps2_tx(0xaa);/* POST successfully */
 	
 	gpio_set(GPIOB, GPIO13);
 	gpio_set(GPIOB, GPIO15);
@@ -526,10 +391,19 @@ int main(void)
 	
 	gpio_set(GPIOB, GPIO11);
 	gpio_set(GPIOA, GPIO8);
-	
+	int j;
+	i = 0;
+	while(ps2_tx(0xaa))
+	{
+		for (j = 0; j < 1000; j++)
+			__asm__("nop");	
+		i++;
+		if(i > 8)
+			break;
+	}
 	printf("Now entry loop\r\n");
 	
-	i = 512;
+	/*i = 512;
 	while(i--)
 	{
 		ps2_poll();
@@ -546,7 +420,7 @@ int main(void)
 			ps2_cmd = 0;
 			sei();
 		}
-	}
+	}*/
 	while (1)
 	{
 		ps2_poll();
@@ -554,12 +428,30 @@ int main(void)
 		{
 			cli();
 			printf("Recieved 0x%02x from host\r\n", ps2_cmd);
-			if(ps2_cmd == 0xff)
-				ps2_tx(0xaa);
-			else
+			if(ps2_cmd != 0xfe && ps2_cmd != 0xee)
 				ps2_tx(0xfa);
+			if(ps2_cmd == 0xee)
+				ps2_tx(0xee);
+			if(ps2_cmd == 0xff && reset < 8)
+			{
+				reset++;
+				i = 0;
+				while(ps2_tx(0xaa))
+				{
+					for (j = 0; j < 1000; j++)
+						__asm__("nop");	
+					i++;
+					if(i > 8)
+						break;
+				}
+			}
 			if(ps2_cmd == 0xf2)
+			{
 				ps2_tx(0xab);
+				ps2_tx(0x83);
+			}
+			if(ps2_cmd == 0xed)
+				printf("LED change\r\n");
 			ps2_cmd = 0;
 			sei();
 		}
