@@ -49,39 +49,39 @@ const struct usb_device_descriptor dev = {
 };
 
 static const uint8_t hid_report_descriptor[] = {
-    0x05, 0x01, /* Usage Page (Generic Desktop)             */
-    0x09, 0x06, /*		Usage (Keyboard)                    */
-    0xA1, 0x01, /*		Collection (Application)            */
+    0x05, 0x01, /* Usage Page (Generic Desktop)	     */
+    0x09, 0x06, /*		Usage (Keyboard)		    */
+    0xA1, 0x01, /*		Collection (Application)	    */
     0x85, 0x01,  /*   Report ID 1  */
-    0x05, 0x07, /*  	Usage (Key codes)                   */
-    0x19, 0xE0, /*      Usage Minimum (224)                 */
-    0x29, 0xE7, /*      Usage Maximum (231)                 */
-    0x15, 0x00, /*      Logical Minimum (0)                 */
-    0x25, 0x01, /*      Logical Maximum (1)                 */
-    0x75, 0x01, /*      Report Size (1)                     */
-    0x95, 0x08, /*      Report Count (8)                    */
+    0x05, 0x07, /*  	Usage (Key codes)		   */
+    0x19, 0xE0, /*      Usage Minimum (224)		 */
+    0x29, 0xE7, /*      Usage Maximum (231)		 */
+    0x15, 0x00, /*      Logical Minimum (0)		 */
+    0x25, 0x01, /*      Logical Maximum (1)		 */
+    0x75, 0x01, /*      Report Size (1)		     */
+    0x95, 0x08, /*      Report Count (8)		    */
     0x81, 0x02, /*      Input (Data, Variable, Absolute)    */
-    0x95, 0x01, /*      Report Count (1)                    */
-    0x75, 0x08, /*      Report Size (8)                     */
+    0x95, 0x01, /*      Report Count (1)		    */
+    0x75, 0x08, /*      Report Size (8)		     */
     0x81, 0x01, /*      Input (Constant)    ;5 bit padding  */
-    0x95, 0x05, /*      Report Count (5)                    */
-    0x75, 0x01, /*      Report Size (1)                     */
-    0x05, 0x08, /*      Usage Page (Page# for LEDs)         */
-    0x19, 0x01, /*      Usage Minimum (01)                  */
-    0x29, 0x05, /*      Usage Maximum (05)                  */
+    0x95, 0x05, /*      Report Count (5)		    */
+    0x75, 0x01, /*      Report Size (1)		     */
+    0x05, 0x08, /*      Usage Page (Page# for LEDs)	 */
+    0x19, 0x01, /*      Usage Minimum (01)		  */
+    0x29, 0x05, /*      Usage Maximum (05)		  */
     0x91, 0x02, /*      Output (Data, Variable, Absolute)   */
-    0x95, 0x01, /*      Report Count (1)                    */
-    0x75, 0x03, /*      Report Size (3)                     */
-    0x91, 0x01, /*      Output (Constant)                   */
-    0x95, 0x06, /*      Report Count (1)                    */
-    0x75, 0x08, /*      Report Size (3)                     */
-    0x15, 0x00, /*      Logical Minimum (0)                 */
-    0x25, 0x65, /*      Logical Maximum (101)               */
-    0x05, 0x07, /*  	Usage (Key codes)                   */
-    0x19, 0x00, /*      Usage Minimum (00)                  */
-    0x29, 0x65, /*      Usage Maximum (101)                 */
-    0x81, 0x00, /*      Input (Data, Array)                 */
-    0xC0        /* 		End Collection,End Collection       */
+    0x95, 0x01, /*      Report Count (1)		    */
+    0x75, 0x03, /*      Report Size (3)		     */
+    0x91, 0x01, /*      Output (Constant)		   */
+    0x95, 0x06, /*      Report Count (1)		    */
+    0x75, 0x08, /*      Report Size (3)		     */
+    0x15, 0x00, /*      Logical Minimum (0)		 */
+    0x25, 0x65, /*      Logical Maximum (101)	       */
+    0x05, 0x07, /*  	Usage (Key codes)		   */
+    0x19, 0x00, /*      Usage Minimum (00)		  */
+    0x29, 0x65, /*      Usage Maximum (101)		 */
+    0x81, 0x00, /*      Input (Data, Array)		 */
+    0xC0	/* 		End Collection,End Collection       */
 };
 
 static const struct {
@@ -261,6 +261,7 @@ static void hid_set_config(usbd_device *usbd_dev, uint16_t wValue)
 				dfu_control_request);
 #endif
 	configured = 1;
+	printf("USB device configured\r\n");
 }
 
 static void gpio_init(void)
@@ -320,6 +321,417 @@ int _write(int file, char *ptr, int len)
 	errno = EIO;
 	return -1;
 }
+void delay_us(int i)
+{
+	int j;
+	while(i--)
+		for(j = 0; j < 25; j++)
+			__asm__("nop");
+}
+
+void AK_to_host()
+{
+    delay_us(13);
+    DAT_OUT_0;
+    delay_us(4);
+    CLK_OUT_0;
+    delay_us(36);
+    CLK_OUT_1;
+    delay_us(4);
+    DAT_OUT_1;
+}
+
+/*******************************************************
+*-函数名称	：
+*-函数作用	：从主机读数据
+*-参数		：
+*-返回值   	：0 接收错误；
+*-备注		： 从主机发送到键盘/鼠标的数据在上升沿 当时钟从低变到高的时候 被读取 。
+*******************************************************/
+unsigned char PS2_DAT_R()
+{
+    unsigned char dat = 0, i = 0,j = 0,k = 0,send_flag = 0;	     //j,k 校验用
+    int delay_t = 20000;		   //while 循环里递减计数
+    cli();
+    CLK_OUT_1;
+    DAT_OUT_1;
+    
+    if(!CLK_IN)			   //时钟被主机拉低
+    {   
+	printf("Read from host:\r\n");
+	
+	while((!CLK_IN))// && (delay_t > 0))   //等待主机释放时钟
+	{
+	    
+	    if(!DAT_IN) send_flag = 1;
+	   // delay_t--;
+	}
+	
+	
+	if(!DAT_IN) send_flag = 1;
+	   
+	if(send_flag == 0)
+	{
+	    printf("ERROR,PS2_DAT is high while host pull CLK\r\n");
+	    dat = 0;
+	    goto error;			      //判断数据线如果为高就产生错误，放弃接受数据
+	}
+	/*if(delay_t == 0)
+	{
+	    printf("wait for host release PS2_CLK=1 timeout!\r\n");
+	    dat = 0;
+	    goto error;
+	    //return 0;			      //判断数据线如果为高就产生错误，放弃接受数据
+	}  */
+	
+	//读8位数据
+	for(i=0;i<8;i++)
+	{
+	    delay_us(delaytime);
+	    CLK_OUT_0;
+	    delay_us(delaytime);
+	    delay_us(delaytime);
+	    CLK_OUT_1;
+	    delay_us(delaytime);
+	    if(DAT_IN)  
+	    {
+		dat |= ((unsigned char)1<<i) ;
+		j++;
+	    }
+	}
+	
+	//读校验位
+	delay_us(delaytime);
+	CLK_OUT_0;
+	delay_us(delaytime);
+	delay_us(delaytime);
+	CLK_OUT_1;
+	delay_us(delaytime);
+	
+	k = 0;
+	if(DAT_IN)
+	k = 1;//保存校验
+	
+	//读停止位
+	delay_us(delaytime);
+	CLK_OUT_0;
+	delay_us(delaytime);
+	delay_us(delaytime);
+	CLK_OUT_1;
+	delay_us(delaytime);
+       
+	
+       // 数据线仍旧为 0 吗
+       // 是 保持时钟直到数据 1 然后产生一个错误
+       if(!DAT_IN)
+       {
+	   //持续产生时钟
+	    while(!DAT_IN)
+	    {
+		delay_us(delaytime);
+		CLK_OUT_0;
+		delay_us(delaytime);
+		delay_us(delaytime);
+		CLK_OUT_1;
+		delay_us(delaytime);
+	    }
+	    printf("DAT IS LOW AFTER SOTP BIT\r\n");
+       }
+	//从机应答
+	AK_to_host();
+       
+       //检查校验位
+	if(k == (j%2)) 
+	{
+	    printf("parity bit FAIL\r\n");//校验失败
+	    return (0x10 + dat);
+	}	    
+       
+       //延时，给主机时间抑制下次的传送
+       //delay_us(45);
+       printf("dt=%d\r\n", delay_t);
+    }
+error:
+    sei();
+    return dat;
+}
+
+/*******************************************************
+*-函数名称	：PS2键盘发送函数
+*-函数作用	：从键盘/鼠标发送到主机的数据在时钟信号的下降沿 当时钟从高变到低的时候 被读取
+	     
+*-参数		：
+*-返回值	    ：0 发送成功，1发送失败
+*-备注		：
+*******************************************************/
+
+unsigned char  PS2_DAT_W(unsigned char byte)
+{
+    unsigned int i = 0,j=0;
+    cli();
+    CLK_OUT_1;
+    DAT_OUT_1;
+    //起始位0
+     
+    while(!CLK_IN)  
+    {
+	printf("PS2_CLK is unrelease\r\n");
+	i++;
+	if(i > 1000)
+		goto out;
+    }
+    
+    
+    //1个起始位 总是为 0   
+    DAT_OUT_0;	 
+    delay_us(delaytime);
+
+    
+    CLK_OUT_0; 
+    delay_us(delaytime);
+    delay_us(delaytime);
+   
+    CLK_OUT_1;
+    delay_us(delaytime);
+    
+    //8位数据收发
+    for(i=0;i<8;i++)
+    {	
+	//装载要从键盘发送到主机的数据
+	if(((byte>>i)&0x01))
+	{
+	  DAT_OUT_1;
+	    j++;
+	}
+	else DAT_OUT_0;
+	delay_us(delaytime);
+	
+	//把时钟拉低
+	CLK_OUT_0;
+	delay_us(delaytime);
+	delay_us(delaytime);
+	
+	//释放时钟
+	CLK_OUT_1;
+	delay_us(delaytime);	
+     }
+    
+    //校验，如果数据位中包含偶数个 1 校验位就会置 1 如果数据位中包含奇数个 1 校验位就会置 0
+    
+     
+//    while(!(GPIOB->IDR & GPIO_Pin_13))
+//    {
+//	
+//	printf("chushihua2\r\n");
+//	return SEND_ERRO;    //如果主机拉低时钟线则返回
+
+//    }   
+   if(j%2==0)  DAT_OUT_1;
+   else  DAT_OUT_0;
+    delay_us(delaytime);
+    
+    CLK_OUT_0;
+    delay_us(delaytime);
+    delay_us(delaytime); 
+    
+    //发送停止位 
+    CLK_OUT_1;
+    delay_us(delaytime);
+
+    DAT_OUT_1;
+    delay_us(delaytime);
+    
+    CLK_OUT_0;
+    delay_us(delaytime); 
+    delay_us(delaytime);
+    
+    CLK_OUT_1; 
+    delay_us(delaytime * 2);
+out:    
+    sei();
+    return SEND_OK;		       //0 发送成功，1发送失败
+}
+
+
+
+
+/*******************************************************
+*-函数名称	：PS2键盘接收发送函数
+*-函数作用	：从键盘/鼠标发送到主机的数据在时钟信号的下降沿 当时钟从高变到低的时候 被读取
+	     
+*-参数		：
+*-返回值	    ：0 发送成功，1发送失败
+*-备注		：
+*******************************************************/
+
+unsigned char  PS2_DAT_RW(unsigned char byte)
+{
+    //判断从主机接收
+     if(!CLK_IN)  
+    {
+	printf("PS2_CLK is unrelease\r\n");
+	delay_us(50);
+	if(!CLK_IN)  delay_us(50);
+	if(!DAT_IN)  return PS2_DAT_R();// Read_from_host();说明主机要发命令
+    }
+    
+    //等待时钟被释放，往主机发送数据
+    while(!CLK_IN);
+    if(byte == 0) return 0;
+    return PS2_DAT_W(byte);
+}
+
+
+/*******************************************************
+*-函数名称	：
+*-函数作用	：处理从主机接收到的命令
+*-参数		：
+*-返回值	：
+*-备注		：
+*******************************************************/
+void PS2_DAT_R_A(unsigned char dat)
+{
+    static unsigned char Lastword = 0; //Lastword保存PS2最后发出的命令或回应
+    static unsigned char reset = 0;
+    if(dat != 0) 
+    {
+       printf("HOST : %x\r\n",dat);
+	switch (dat)
+	{
+	    case 0xFF: 
+		printf("PS2 : OK & RESET \r\n");
+		//led_on();
+	    	if(reset < 3)
+	    	{
+			Lastword = 0XFA;
+			PS2_DAT_W(Lastword); 
+			//led_off();
+			Lastword = 0xAA;
+			PS2_DAT_W(Lastword); 
+			reset ++;
+		}
+		else
+		{
+			printf("More than 3 resets, break\r\n");
+		}
+		break;
+	    
+	    case 0XFE:
+		printf("PS2 : Resend\r\n");
+		PS2_DAT_W(Lastword); 
+		break;
+	    
+	    case 0XFD:
+		printf("PS2 :Set Key Type Make\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;
+	    
+	    case 0XFC:
+		printf("PS2 : Set Key Type Make/Break\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;
+	    
+	    case 0XFB:
+		printf("PS2 :Set Key Type Typematic\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;
+	    
+	    case 0XFA:
+		printf("PS2 :Set All Keys Typematic/Make/Break\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0XF9:
+		printf("PS2 : Set All Keys Make\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0XF8:
+		printf("PS2 :Set All Keys Make/Break\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0XF7:
+		printf("PS2 :Set All Keys Typematic\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0XF6:
+		printf("PS2 :Set Default\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0XF5:  //键盘停止扫描 载入缺省值 键 Set Default 命令 等待进一步指令
+		printf("PS2 : Disable\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;  
+	    
+	    case 0XF4:
+		printf("PS2 : Enable\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break; 
+	    
+	    case 0XF3:			    //主机在这条命令后会发送一个字节的参数来定义机打速率和延时
+		printf("PS2 :Set Typematic Rate/Delay\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0XF2:
+		printf("PS2 :Read ID\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		Lastword = 0XAB;
+		PS2_DAT_W(Lastword); 
+		Lastword = 0X83;
+		PS2_DAT_W(Lastword);		
+		break;   
+	    
+	    //主机在这个命令后发送一个字节的参数 是定键盘使用哪套扫描码集
+	    //参数字节可以是 0x01 0x02 或 0x03 分别选择扫描码集第一套 第二套或第三套		
+	    case 0XF0:
+		printf("PS2 : Set Scan Code Set\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break;   
+	    
+	    case 0xEE:
+		printf("PS2 : Echo\r\n");
+		Lastword = 0XEE;
+		PS2_DAT_W(Lastword); 
+		break; 
+
+	    //主机在本命令后跟随一个参数字节 用于指示键盘上 Num Lock, Caps Lock,
+	    //and Scroll Lock LED 的状态 
+	    //只是最初可用于 PS/2 键盘
+	    case 0XED:
+		printf("PS2 : Set/Reset LEDs\r\n");
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+		break; 
+	    
+	   
+	    default:
+		
+		Lastword = 0XFA;
+		PS2_DAT_W(Lastword); 
+
+		printf("PS2 :default\r\n");
+		break;
+	}
+    }
+}
+
 
 
 //7 * 10 keyboard
@@ -337,8 +749,8 @@ volatile int8_t hid_keys = 0;
 int main(void)
 {
 	int i;
-	int reset = 0;
-	
+	unsigned char dat = 0;
+	int dat_c = 0;
 	vector_init();
 	
 
@@ -368,11 +780,8 @@ int main(void)
 	exti_direction = FALLING;
 	exti_set_trigger(EXTI13, EXTI_TRIGGER_FALLING);
 	exti_enable_request(EXTI13);*/
-
-	for (i = 0; i < 0x10000; i++)
-		__asm__("nop");	
 	
-	//ps2_tx(0xaa);/* POST successfully */
+	//PS2_DAT_W(0xaa);/* POST successfully */
 	
 	gpio_set(GPIOB, GPIO13);
 	gpio_set(GPIOB, GPIO15);
@@ -390,71 +799,36 @@ int main(void)
 	systick_counter_enable();	
 	
 	gpio_set(GPIOB, GPIO11);
-	gpio_set(GPIOA, GPIO8);
-	int j;
-	i = 0;
-	while(ps2_tx(0xaa))
+
+	PS2_DAT_W(0xaa);
+	i = 0;	
+	printf("Waiting for PS2 connection...\r\n");
+	cli();
+	while(1)
 	{
-		for (j = 0; j < 1000; j++)
-			__asm__("nop");	
+		dat = PS2_DAT_R();		  //读主机发送到从机的数据
 		i++;
-		if(i > 8)
+		if(dat != 0) PS2_DAT_R_A(dat);
+		if(dat == 0xff)  
+		{
+			dat_c ++;
+			if(dat_c>1)
+			{
+				break;
+			}
+		   
+		}
+		i++;
+		if(i > 500)
 			break;
 	}
 	printf("Now entry loop\r\n");
-	
-	/*i = 512;
-	while(i--)
-	{
-		ps2_poll();
-		if(ps2_cmd)
-		{
-			cli();
-			printf("Recieved 0x%02x from host\r\n", ps2_cmd);
-			if(ps2_cmd == 0xff)
-				ps2_tx(0xaa);
-			else
-				ps2_tx(0xfa);
-			if(ps2_cmd == 0xf2)
-				ps2_tx(0xab);
-			ps2_cmd = 0;
-			sei();
-		}
-	}*/
+	sei();
+	gpio_set(GPIOA, GPIO8);
 	while (1)
 	{
-		ps2_poll();
-		if(ps2_cmd)
-		{
-			cli();
-			printf("Recieved 0x%02x from host\r\n", ps2_cmd);
-			if(ps2_cmd != 0xfe && ps2_cmd != 0xee)
-				ps2_tx(0xfa);
-			if(ps2_cmd == 0xee)
-				ps2_tx(0xee);
-			if(ps2_cmd == 0xff && reset < 8)
-			{
-				reset++;
-				i = 0;
-				while(ps2_tx(0xaa))
-				{
-					for (j = 0; j < 1000; j++)
-						__asm__("nop");	
-					i++;
-					if(i > 8)
-						break;
-				}
-			}
-			if(ps2_cmd == 0xf2)
-			{
-				ps2_tx(0xab);
-				ps2_tx(0x83);
-			}
-			if(ps2_cmd == 0xed)
-				printf("LED change\r\n");
-			ps2_cmd = 0;
-			sei();
-		}
+		dat = PS2_DAT_R();		  //读主机发送到从机的数据
+       		if(dat != 0) PS2_DAT_R_A(dat);      //从机应答
 		usbd_poll(usb_dev);
 	}
 }
@@ -521,9 +895,9 @@ void sys_tick_handler(void)
 								}
 							}
 							//cli();
-							ps2_tx(0xe0);
-							ps2_tx(PS2_RELEASED);
-							ps2_tx(PS2_EX_SCRN & 0xff);
+							PS2_DAT_W(0xe0);
+							PS2_DAT_W(PS2_RELEASED);
+							PS2_DAT_W(PS2_EX_SCRN & 0xff);
 							//exti_reset_request(EXTI13);
 							//sei();
 							printf("ctrl+prtsc prtsc up\r\n");
@@ -550,9 +924,9 @@ void sys_tick_handler(void)
 						{
 							//cli();
 							if(ex)
-								ps2_tx(0xe0);
-							ps2_tx(PS2_RELEASED);
-							ps2_tx(key1);
+								PS2_DAT_W(0xe0);
+							PS2_DAT_W(PS2_RELEASED);
+							PS2_DAT_W(key1);
 							printf("tx key1 up %d\r\n", key1);
 							//exti_reset_request(EXTI13);
 							//sei();
@@ -563,8 +937,8 @@ void sys_tick_handler(void)
 								asm("nop");
 							//cli();
 							printf("tx key2 up %d\r\n", key2);
-							ps2_tx(PS2_RELEASED);
-							ps2_tx(key2);
+							PS2_DAT_W(PS2_RELEASED);
+							PS2_DAT_W(key2);
 							//exti_reset_request(EXTI13);
 							//sei();
 						}				
@@ -583,7 +957,7 @@ void sys_tick_handler(void)
 							ctrlprt = 1;
 							hid_buf[1] |= MOD_CTRL;
 							//cli();
-							ps2_tx(PS2_L_CTRL);
+							PS2_DAT_W(PS2_L_CTRL);
 							//exti_reset_request(EXTI13);
 							//sei();
 							printf("ctrl+prtsc ctrl down\r\n");
@@ -609,8 +983,8 @@ void sys_tick_handler(void)
 						{
 							//cli();
 							if(ex)
-								ps2_tx(0xe0);
-							ps2_tx(key1);
+								PS2_DAT_W(0xe0);
+							PS2_DAT_W(key1);
 							//exti_reset_request(EXTI13);
 							//sei();
 							printf("tx key 1 down %d\r\n", key1);
@@ -618,7 +992,7 @@ void sys_tick_handler(void)
 						if(key2)
 						{
 							//cli();
-							ps2_tx(key2);
+							PS2_DAT_W(key2);
 							//exti_reset_request(EXTI13);
 							//sei();
 							printf("tx key 2 down %d\r\n", key2);
@@ -641,8 +1015,8 @@ void sys_tick_handler(void)
 				}
 			}
 			//cli();
-			ps2_tx(PS2_RELEASED);
-			ps2_tx(PS2_0);
+			PS2_DAT_W(PS2_RELEASED);
+			PS2_DAT_W(PS2_0);
 			//exti_reset_request(EXTI13);
 			//sei();
 			printf("key up 0");
@@ -658,7 +1032,7 @@ void sys_tick_handler(void)
 				}
 			}
 			//cli();
-			ps2_tx(PS2_0);
+			PS2_DAT_W(PS2_0);
 			//exti_reset_request(EXTI13);
 			//sei();
 			printf("keydown 0");
@@ -670,8 +1044,8 @@ void sys_tick_handler(void)
 	{
 		hid_buf[1] &= ~MOD_CTRL;
 		//cli();
-		ps2_tx(PS2_RELEASED);
-		ps2_tx(PS2_L_CTRL);
+		PS2_DAT_W(PS2_RELEASED);
+		PS2_DAT_W(PS2_L_CTRL);
 		//exti_reset_request(EXTI13);
 		//sei();
 		ctrlprt = 6;
@@ -684,8 +1058,8 @@ void sys_tick_handler(void)
 	if(ctrlprt == 2)
 	{
 		//cli();
-		ps2_tx(0xe0);
-		ps2_tx(PS2_EX_SCRN & 0xff);
+		PS2_DAT_W(0xe0);
+		PS2_DAT_W(PS2_EX_SCRN & 0xff);
 		//exti_reset_request(EXTI13);
 		//sei();
 		
@@ -711,9 +1085,9 @@ void sys_tick_handler(void)
 	if(cnt == 20)
 	{
 		//printf("cnt = %d \r\n", cnt);
-		//ps2_tx(0x1c);
+		//PS2_DAT_W(0x1c);
 		//printf("Still alive\r\n"); 
-		gpio_toggle(GPIOB, GPIO11);
+		//gpio_toggle(GPIOB, GPIO11);
 		cnt = 0;
 	}
 }

@@ -223,3 +223,17 @@ static const uint32_t PS2_map[10][7] =
 
 #define cli() asm volatile ("cpsid i")
 #define sei() asm volatile ("cpsie i")
+
+#define CLK_IN (GPIOB_IDR & GPIO13)
+#define DAT_IN (GPIOB_IDR & GPIO15)
+
+#define CLK_OUT_1 gpio_set(GPIOB, GPIO13)
+#define CLK_OUT_0 gpio_clear(GPIOB, GPIO13)
+
+#define DAT_OUT_1 gpio_set(GPIOB, GPIO15)
+#define DAT_OUT_0 gpio_clear(GPIOB, GPIO15)
+
+#define delaytime   20 //时钟高  微秒低  微秒
+
+#define SEND_OK 0
+#define SEND_ERRO 1

@@ -40,7 +40,7 @@ static void gpio_setup(void)
 {
 	/* Set GPIO12 (in GPIO port C) to 'output push-pull'. */
 	gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_50_MHZ,
-		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO11);
+		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO12);
 }
 
 int main(void)
@@ -52,7 +52,7 @@ int main(void)
 
 	/* Blink the LED (PC12) on the board. */
 	while (1) {
-		gpio_toggle(GPIOB, GPIO11);	/* LED on/off */
+		gpio_toggle(GPIOB, GPIO12);	/* LED on/off */
 		for (i = 0; i < 800000; i++)	/* Wait a bit. */
 			__asm__("nop");
 	}
